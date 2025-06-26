@@ -62,10 +62,16 @@ def send_lead_notification():
     Endpoint para enviar notificação de novo lead
     """
     try:
-        data = request.get_json()
-        logging.info(f"Requisição recebida para /send-lead-notification com dados: {data}")
-        
-        # Validar dados recebidos
+        # 1) Leia SEMPRE o corpo cru
+        raw = request.data
+        # 2) Faça o parse “na mão”
+        data = json.loads(raw)
+
+        logging.info(f"Headers recebidos: {dict(request.headers)}")
+        logging.info(f"Body raw: {raw}")
+        logging.info(f"Payload parseado: {data}")
+
+        # 3) Valide os campos
         required_fields = ['name', 'email', 'phone']
         for field in required_fields:
             if field not in data:
