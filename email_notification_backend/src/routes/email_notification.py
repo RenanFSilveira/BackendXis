@@ -4,6 +4,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify
 from datetime import datetime
+import logging
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 email_bp = Blueprint('email', __name__)
 
@@ -18,7 +22,11 @@ def send_email(to_email, subject, body, smtp_server=None, smtp_port=None, smtp_u
         smtp_user = smtp_user or os.getenv('SMTP_USER')
         smtp_password = smtp_password or os.getenv('SMTP_PASSWORD')
         
+        logging.info(f"Tentando enviar e-mail para: {to_email}")
+        logging.info(f"SMTP Server: {smtp_server}, Port: {smtp_port}, User: {smtp_user}")
+
         if not smtp_user or not smtp_password:
+            logging.error("Credenciais SMTP não configuradas. Verifique SMTP_USER e SMTP_PASSWORD.")
             raise ValueError("Credenciais SMTP não configuradas")
         
         # Criar mensagem
@@ -40,9 +48,11 @@ def send_email(to_email, subject, body, smtp_server=None, smtp_port=None, smtp_u
         server.sendmail(smtp_user, to_email, text)
         server.quit()
         
+        logging.info("E-mail enviado com sucesso!")
         return True, "E-mail enviado com sucesso"
         
     except Exception as e:
+        logging.error(f"Erro ao enviar e-mail: {e}", exc_info=True) # exc_info=True para logar o traceback completo
         return False, str(e)
 
 @email_bp.route('/send-lead-notification', methods=['POST'])
@@ -52,11 +62,13 @@ def send_lead_notification():
     """
     try:
         data = request.get_json()
+        logging.info(f"Requisição recebida para /send-lead-notification com dados: {data}")
         
         # Validar dados recebidos
         required_fields = ['name', 'email', 'phone']
         for field in required_fields:
             if field not in data:
+                logging.warning(f"Campo obrigatório ausente: {field}")
                 return jsonify({'error': f'Campo {field} é obrigatório'}), 400
         
         # Extrair dados do lead
@@ -68,6 +80,7 @@ def send_lead_notification():
         # E-mail de destino (onde você quer receber as notificações)
         notification_email = os.getenv('NOTIFICATION_EMAIL')
         if not notification_email:
+            logging.error("E-mail de notificação não configurado. Verifique NOTIFICATION_EMAIL.")
             return jsonify({'error': 'E-mail de notificação não configurado'}), 500
         
         # Criar conteúdo do e-mail
@@ -93,11 +106,14 @@ def send_lead_notification():
         success, message = send_email(notification_email, subject, body)
         
         if success:
+            logging.info("Notificação de lead enviada com sucesso.")
             return jsonify({'message': 'Notificação enviada com sucesso'}), 200
         else:
+            logging.error(f"Falha ao enviar notificação de lead: {message}")
             return jsonify({'error': f'Erro ao enviar e-mail: {message}'}), 500
             
     except Exception as e:
+        logging.error(f"Erro inesperado no endpoint /send-lead-notification: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @email_bp.route('/test-email', methods=['POST'])
@@ -109,7 +125,10 @@ def test_email():
         data = request.get_json()
         test_email = data.get('email')
         
+        logging.info(f"Requisição recebida para /test-email com e-mail: {test_email}")
+
         if not test_email:
+            logging.warning("E-mail de teste é obrigatório.")
             return jsonify({'error': 'E-mail de teste é obrigatório'}), 400
         
         subject = "Teste de Envio de E-mail"
@@ -126,10 +145,13 @@ def test_email():
         success, message = send_email(test_email, subject, body)
         
         if success:
+            logging.info("E-mail de teste enviado com sucesso.")
             return jsonify({'message': 'E-mail de teste enviado com sucesso'}), 200
         else:
+            logging.error(f"Falha ao enviar e-mail de teste: {message}")
             return jsonify({'error': f'Erro ao enviar e-mail de teste: {message}'}), 500
             
     except Exception as e:
+        logging.error(f"Erro inesperado no endpoint /test-email: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
