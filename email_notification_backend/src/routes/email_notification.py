@@ -1,3 +1,4 @@
+import json
 import smtplib
 import os
 from email.mime.text import MIMEText
@@ -122,7 +123,8 @@ def test_email():
     Endpoint para testar o envio de e-mail
     """
     try:
-        data = request.get_json()
+        data = json.loads(request.data)
+        logging.info(f"Requisição recebida para /send-lead-notification com dados: {data}")
         test_email = data.get('email')
         
         logging.info(f"Requisição recebida para /test-email com e-mail: {test_email}")
