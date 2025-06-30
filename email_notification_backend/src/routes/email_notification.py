@@ -21,31 +21,39 @@ def processa_leads_pendentes():
         return jsonify({'error': 'Unauthorized'}), 401
 
     try:
-        # 2) Conecta no Supabase via psycopg2
-        url = os.getenv('DATABASE_URL')
-        conn = psycopg2.connect(url, sslmode='require')
-        cur = conn.cursor()
+        SUPABASE_URL = os.getenv('SUPABASE_URL')
+        SUPABASE_API_KEY = os.getenv('SUPABASE_API_KEY')
 
-        # 3) Leva os leads não notificados
-        cur.execute("""
-            SELECT id, name, email, phone, COALESCE(message, '') 
-            FROM public.form_submissions
-            WHERE email_enviado = false
-            FOR UPDATE SKIP LOCKED
-        """)
-        leads = cur.fetchall()
+        headers = {
+            "apikey": SUPABASE_API_KEY,
+            "Authorization": f"Bearer {SUPABASE_API_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
 
-        # 4) Envia e marca como enviado
-        for lead_id, name, email, phone, message in leads:
-            subject = f"Novo Lead – {name}"
+        # 2) Buscar os leads não notificados
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/form_submissions?email_enviado=eq.false",
+            headers=headers
+        )
+        if response.status_code != 200:
+            logging.error(f"Erro ao buscar leads: {response.text}")
+            return jsonify({'error': 'Erro ao buscar leads'}), 500
+
+        leads = response.json()
+        processed = 0
+
+        # 3) Envia os emails e marca como enviado
+        for lead in leads:
+            subject = f"Novo Lead – {lead['name']}"
             body = f"""
             <html><body>
               <h2>Novo Lead Recebido</h2>
               <p><strong>Data/Hora:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-              <p><strong>Nome:</strong> {name}</p>
-              <p><strong>E‑mail:</strong> {email}</p>
-              <p><strong>Telefone:</strong> {phone}</p>
-              <p><strong>Mensagem:</strong> {message or '—'}</p>
+              <p><strong>Nome:</strong> {lead['name']}</p>
+              <p><strong>E‑mail:</strong> {lead['email']}</p>
+              <p><strong>Telefone:</strong> {lead['phone']}</p>
+              <p><strong>Mensagem:</strong> {lead['message'] or '—'}</p>
             </body></html>
             """
             success, msg = send_email(
@@ -53,18 +61,22 @@ def processa_leads_pendentes():
                 subject=subject,
                 body=body
             )
-            if success:
-                cur.execute(
-                    "UPDATE public.form_submissions SET email_enviado = true WHERE id = %s",
-                    (lead_id,)
-                )
-            else:
-                logging.error(f"Falha ao notificar lead {lead_id}: {msg}")
 
-        conn.commit()
-        cur.close()
-        conn.close()
-        return jsonify({'processed': len(leads)}), 200
+            if success:
+                # Atualiza o campo email_enviado
+                update_response = requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/form_submissions?id=eq.{lead['id']}",
+                    headers=headers,
+                    json={"email_enviado": True}
+                )
+                if update_response.status_code in [200, 204]:
+                    processed += 1
+                else:
+                    logging.error(f"Erro ao atualizar lead {lead['id']}: {update_response.text}")
+            else:
+                logging.error(f"Falha ao notificar lead {lead['id']}: {msg}")
+
+        return jsonify({'processed': processed}), 200
 
     except Exception as e:
         logging.exception("Erro ao processar leads pendentes")
