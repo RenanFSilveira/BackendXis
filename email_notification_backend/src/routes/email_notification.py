@@ -6,6 +6,7 @@ from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import logging
+import json
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -116,37 +117,52 @@ def send_email(to_email, subject, body, smtp_server=None, smtp_port=None, smtp_u
         logging.error(f"Erro ao enviar e-mail: {e}", exc_info=True) # exc_info=True para logar o traceback completo
         return False, str(e)
 
+import json
+from flask import request, jsonify
+from datetime import datetime
+import logging
+
 @email_bp.route('/send-lead-notification', methods=['POST'])
 def send_lead_notification():
     """
-    Endpoint para enviar notificação de novo lead
+    Endpoint para enviar notificação de novo lead, agora aceitando texto bruto
+    e convertendo com json.loads independentemente do Content-Type.
     """
     try:
-        data = request.get_json()
+        # 1) Leitura do corpo bruto como texto
+        raw = request.get_data(as_text=True)
+        logging.info(f"RAW BODY: {raw}")
+
+        # 2) Parse manual do JSON
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logging.error("Falha ao decodificar JSON do corpo da requisição.")
+            return jsonify({'error': 'Payload inválido: não é um JSON válido'}), 400
+
         logging.info(f"Requisição recebida para /send-lead-notification com dados: {data}")
-        
-        # Validar dados recebidos
+
+        # 3) Validação de campos obrigatórios
         required_fields = ['name', 'email', 'phone']
         for field in required_fields:
             if field not in data:
                 logging.warning(f"Campo obrigatório ausente: {field}")
                 return jsonify({'error': f'Campo {field} é obrigatório'}), 400
-        
-        # Extrair dados do lead
-        lead_name = data.get('name')
-        lead_email = data.get('email')
-        lead_phone = data.get('phone')
+
+        # 4) Extrair dados do lead
+        lead_name    = data['name']
+        lead_email   = data['email']
+        lead_phone   = data['phone']
         lead_message = data.get('message', 'Não informado')
-        
-        # E-mail de destino (onde você quer receber as notificações)
+
+        # 5) Verificar e-mail de notificação
         notification_email = os.getenv('NOTIFICATION_EMAIL')
         if not notification_email:
             logging.error("E-mail de notificação não configurado. Verifique NOTIFICATION_EMAIL.")
             return jsonify({'error': 'E-mail de notificação não configurado'}), 500
-        
-        # Criar conteúdo do e-mail
+
+        # 6) Montar e enviar o e-mail
         subject = f"Novo Lead - {lead_name}"
-        
         body = f"""
         <html>
         <body>
@@ -162,20 +178,19 @@ def send_lead_notification():
         </body>
         </html>
         """
-        
-        # Enviar e-mail
+
         success, message = send_email(notification_email, subject, body)
-        
         if success:
             logging.info("Notificação de lead enviada com sucesso.")
             return jsonify({'message': 'Notificação enviada com sucesso'}), 200
         else:
             logging.error(f"Falha ao enviar notificação de lead: {message}")
             return jsonify({'error': f'Erro ao enviar e-mail: {message}'}), 500
-            
+
     except Exception as e:
         logging.error(f"Erro inesperado no endpoint /send-lead-notification: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
 
 @email_bp.route('/test-email', methods=['POST'])
 def test_email():
