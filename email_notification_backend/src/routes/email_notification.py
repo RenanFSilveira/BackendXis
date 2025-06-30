@@ -1,6 +1,6 @@
-import json
 import smtplib
 import os
+import psycopg2
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Blueprint, request, jsonify
@@ -12,10 +12,70 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 email_bp = Blueprint('email', __name__)
 
+@email_bp.route('/processa-leads-pendentes', methods=['POST'])
+def processa_leads_pendentes():
+    # 1) Autentica a chamada do cron job
+    cron_key = request.headers.get('X-CRON-KEY')
+    if cron_key != os.getenv('CRON_KEY'):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        # 2) Conecta no Supabase via psycopg2
+        url = os.getenv('DATABASE_URL')
+        conn = psycopg2.connect(url, sslmode='require')
+        cur = conn.cursor()
+
+        # 3) Leva os leads não notificados
+        cur.execute("""
+            SELECT id, name, email, phone, COALESCE(message, '') 
+            FROM public.form_submissions
+            WHERE email_enviado = false
+            FOR UPDATE SKIP LOCKED
+        """)
+        leads = cur.fetchall()
+
+        # 4) Envia e marca como enviado
+        for lead_id, name, email, phone, message in leads:
+            subject = f"Novo Lead – {name}"
+            body = f"""
+            <html><body>
+              <h2>Novo Lead Recebido</h2>
+              <p><strong>Data/Hora:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+              <p><strong>Nome:</strong> {name}</p>
+              <p><strong>E‑mail:</strong> {email}</p>
+              <p><strong>Telefone:</strong> {phone}</p>
+              <p><strong>Mensagem:</strong> {message or '—'}</p>
+            </body></html>
+            """
+            success, msg = send_email(
+                to_email=os.getenv('NOTIFICATION_EMAIL'),
+                subject=subject,
+                body=body
+            )
+            if success:
+                cur.execute(
+                    "UPDATE public.form_submissions SET email_enviado = true WHERE id = %s",
+                    (lead_id,)
+                )
+            else:
+                logging.error(f"Falha ao notificar lead {lead_id}: {msg}")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'processed': len(leads)}), 200
+
+    except Exception as e:
+        logging.exception("Erro ao processar leads pendentes")
+        return jsonify({'error': str(e)}), 500
+
 def send_email(to_email, subject, body, smtp_server=None, smtp_port=None, smtp_user=None, smtp_password=None):
     """
     Função para enviar e-mail usando SMTP
     """
+    if not to_email:
+        logging.error("E-mail de destino não especificado.")
+        return False, "E-mail de destino não especificado"
     try:
         # Configurações padrão do Gmail (pode ser alterado via variáveis de ambiente)
         smtp_server = smtp_server or os.getenv('SMTP_SERVER', 'smtp.gmail.com')
@@ -62,16 +122,10 @@ def send_lead_notification():
     Endpoint para enviar notificação de novo lead
     """
     try:
-        # 1) Leia SEMPRE o corpo cru
-        raw = request.data
-        # 2) Faça o parse “na mão”
-        data = json.loads(raw)
-
-        logging.info(f"Headers recebidos: {dict(request.headers)}")
-        logging.info(f"Body raw: {raw}")
-        logging.info(f"Payload parseado: {data}")
-
-        # 3) Valide os campos
+        data = request.get_json()
+        logging.info(f"Requisição recebida para /send-lead-notification com dados: {data}")
+        
+        # Validar dados recebidos
         required_fields = ['name', 'email', 'phone']
         for field in required_fields:
             if field not in data:
@@ -129,8 +183,7 @@ def test_email():
     Endpoint para testar o envio de e-mail
     """
     try:
-        data = json.loads(request.data)
-        logging.info(f"Requisição recebida para /send-lead-notification com dados: {data}")
+        data = request.get_json()
         test_email = data.get('email')
         
         logging.info(f"Requisição recebida para /test-email com e-mail: {test_email}")
