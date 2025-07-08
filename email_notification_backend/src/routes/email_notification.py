@@ -8,9 +8,14 @@ from datetime import datetime
 import logging
 import json
 import requests
+import pytz
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Fuso horário do Brasil (Brasília)
+br_tz = pytz.timezone('America/Sao_Paulo')
+hora_brasil = datetime.now(br_tz).strftime('%d/%m/%Y às %H:%M:%S')
 
 email_bp = Blueprint('email', __name__)
 
@@ -47,10 +52,12 @@ def processa_leads_pendentes():
         # 3) Envia os emails e marca como enviado
         for lead in leads:
             subject = f"Novo Lead – {lead['name']}"
+            br_tz = pytz.timezone('America/Sao_Paulo')
+            data_hora = datetime.now(br_tz).strftime('%d/%m/%Y %H:%M')
             body = f"""
             <html><body>
               <h2>Novo Lead Recebido</h2>
-              <p><strong>Data/Hora:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+              <p><strong>Data/Hora:</strong> {data_hora}</p>
               <p><strong>Nome:</strong> {lead['name']}</p>
               <p><strong>E‑mail:</strong> {lead['email']}</p>
               <p><strong>Telefone:</strong> {lead['phone']}</p>
@@ -221,12 +228,14 @@ def test_email():
             return jsonify({'error': 'E-mail de teste é obrigatório'}), 400
         
         subject = "Teste de Envio de E-mail"
-        body = """
+        br_tz = pytz.timezone('America/Sao_Paulo')
+        data_hora = datetime.now(br_tz).strftime('%d/%m/%Y às %H:%M:%S')
+        body = f"""
         <html>
         <body>
             <h2>Teste de Configuração</h2>
             <p>Se você recebeu este e-mail, a configuração está funcionando corretamente!</p>
-            <p><strong>Data/Hora do teste:</strong> {}</p>
+            <p><strong>Data/Hora do teste:</strong> {data_hora}</p>
         </body>
         </html>
         """.format(datetime.now().strftime('%d/%m/%Y às %H:%M:%S'))
