@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 import logging
 import json
+import requests
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
